@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "freerouting-client"
+version = "2.1.0"
+authors = [
+  { name="Andras Fuchs", email="info@freerouting.app" },
+]
+description = "A Python client library for the Freerouting API (api.freerouting.app)"
+readme = "README.md"
+requires-python = ">=3.7"
+license = { file="LICENSE" }
+keywords = ["freerouting", "pcb", "autorouter", "api", "eda", "electronics", "client"] # Added client
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+dependencies = [
+    "requests>=2.20.0",
+]
+
+[project.urls]
+"Homepage" = "https://www.freerouting.app"
+"Repository" = "https://github.com/freerouting/freerouting-python-client"
+"Bug Tracker" = "https://github.com/freerouting/freerouting-python-client/issues"
+"Documentation" = "https://github.com/freerouting/freerouting/blob/master/docs/API_v1.md"
