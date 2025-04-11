@@ -14,7 +14,7 @@ requires-python = ">=3.7"
 license = { file="LICENSE" }
 keywords = ["freerouting", "pcb", "autorouter", "api", "eda", "electronics", "client"] # Added client
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
