@@ -29,7 +29,7 @@ class FreeroutingClient:
     """Client library for the Freerouting API."""
 
     def __init__(self, api_key: str, base_url: str = "https://api.freerouting.app", version: str = "v1",
-                 profile_id: Optional[str] = None, host_name: str = "FreeroutingPythonClient/0.1.0"): # Updated host_name example
+                 profile_id: Optional[str] = None, host_name: str = "FreeroutingPythonClient/2.1.0"):
         """
         Initialize the Freerouting API client.
 
