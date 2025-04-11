@@ -1,9 +1,8 @@
 # Freerouting Python Client
 
 [![PyPI version](https://badge.fury.io/py/freerouting-client.svg)](https://badge.fury.io/py/freerouting-client)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/license/MIT)
 [![Python Versions](https://img.shields.io/pypi/pyversions/freerouting-client.svg)](https://pypi.org/project/freerouting-client/)
-**Development Status:** Alpha
 
 This library provides a convenient Python interface for interacting with the [Freerouting API](https://api.freerouting.app/v1) (`api.freerouting.app`). It allows you to manage routing sessions, enqueue jobs, upload designs, download results, and monitor progress programmatically.
 
