@@ -1,0 +1,45 @@
+# .github/workflows/publish-to-pypi.yml
+
+name: Publish Python Package to PyPI
+
+# Run this workflow only when a new release is published on GitHub
+on:
+  release:
+    types: [ published ] # Triggers when you click "Publish release"
+
+permissions:
+  contents: read # Needed to check out the repository
+
+jobs:
+  deploy:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4 # Checks out your code
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10' # Choose a Python version
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine # Install build tools
+
+    - name: Build package
+      run: python -m build # Build the sdist and wheel
+
+    - name: Publish package to PyPI
+      # Use the trusted publisher mechanism if configured on PyPI,
+      # otherwise fallback to using the API token.
+      # For simplicity here, we are using the API token method.
+      # See: https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_API_TOKEN }} # Use the secret you created!
+        # repository-url: https://test.pypi.org/legacy/ # Uncomment for testing on TestPyPI
+        # skip-existing: true # Optional: prevents errors if version already exists
