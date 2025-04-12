@@ -8,11 +8,11 @@ version = "2.1.0"
 authors = [
   { name="Andras Fuchs", email="info@freerouting.app" },
 ]
-description = "A Python client library for the Freerouting API (api.freerouting.app)"
+description = "The official Python client library for the Freerouting API (api.freerouting.app), an open-source, advanced PCB (printed circuit board) auto-router"
 readme = "README.md"
 requires-python = ">=3.7"
 license = { file="LICENSE" }
-keywords = ["freerouting", "pcb", "autorouter", "api", "eda", "electronics", "client"] # Added client
+keywords = ["freerouting", "pcb", "printed circuit board", "router", "autorouter", "api", "eda", "electronics", "circuits", "client"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
