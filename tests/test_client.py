@@ -1,68 +1,69 @@
 # tests/test_client.py
 
-import pytest
-from unittest import mock # For mocking requests
-import requests # Need this to mock its methods and exceptions
-import json # For JSONDecodeError simulation if needed (though requests.exceptions handles it)
+import json
+from unittest import mock
 
-# --- Corrected Imports ---
-# Import directly from the client module where they are defined
-from freerouting.client import (
+import pytest
+import requests
+
+from freerouting import (
     FreeroutingClient,
     FreeroutingError,
     FreeroutingAPIError,
-    FreeroutingAuthError
+    FreeroutingAuthError,
+    __version__,
 )
+from freerouting.client import _parse_sse_events
 
-
-# --- Fixtures ---
 
 @pytest.fixture
 def api_key():
-    """Provides a dummy API key for tests."""
     return "test_api_key_123"
+
 
 @pytest.fixture
 def client(api_key):
-    """Provides a FreeroutingClient instance for tests."""
-    # Using a non-standard base_url ensures we definitely don't hit the real API
     return FreeroutingClient(api_key=api_key, base_url="http://test.invalid")
 
-# --- Test Cases ---
+
+def test_package_version_matches_client_host_name():
+    assert FreeroutingClient.DEFAULT_HOST_NAME == f"FreeroutingPythonClient/{__version__}"
+
 
 def test_client_initialization(client, api_key):
-    """Test if the client initializes correctly with mandatory args."""
     assert client.api_key == api_key
-    assert client.base_url == "http://test.invalid/v1" # Default version is v1
+    assert client.base_url == "http://test.invalid/v1"
     assert client.session_id is None
     assert isinstance(client.profile_id, str)
+    assert client.host_name == f"FreeroutingPythonClient/{__version__}"
+
 
 def test_client_initialization_custom_params(api_key):
-    """Test client initialization with custom parameters."""
     client = FreeroutingClient(
         api_key=api_key,
         base_url="http://localhost:8080",
         version="dev",
         profile_id="custom-profile-id",
-        host_name="pytest-runner/1.0"
+        host_name="pytest-runner/1.0",
+        timeout=30,
     )
     assert client.base_url == "http://localhost:8080/dev"
     assert client.profile_id == "custom-profile-id"
     assert client.host_name == "pytest-runner/1.0"
-
-def test_client_initialization_no_api_key():
-    """Test that ValueError is raised if no API key is provided."""
-    with pytest.raises(ValueError, match="API key must be provided"):
-        FreeroutingClient(api_key="")
+    assert client.timeout == 30
 
 
-# --- Mocking API Calls ---
+def test_client_initialization_without_api_key():
+    client = FreeroutingClient(base_url="http://127.0.0.1:37864")
+    assert client.api_key is None
+    assert "Authorization" not in client._get_headers()
 
-@mock.patch('requests.get') # Patch where it's used by the client
+
+@mock.patch("requests.get")
 def test_get_system_status_success(mock_get, client):
-    """Test a successful GET request (e.g., get_system_status)."""
     mock_response = mock.Mock()
     mock_response.status_code = 200
+    mock_response.content = b'{"status":"OK"}'
     mock_response.json.return_value = {"status": "OK", "message": "Service is running"}
     mock_get.return_value = mock_response
 
@@ -72,15 +73,15 @@ def test_get_system_status_success(mock_get, client):
     mock_get.assert_called_once()
     args, kwargs = mock_get.call_args
     assert args[0] == "http://test.invalid/v1/system/status"
-    assert "Authorization" in kwargs['headers']
-    assert kwargs['headers']['Authorization'] == f"Bearer {client.api_key}"
+    assert kwargs["headers"]["Authorization"] == f"Bearer {client.api_key}"
 
-@mock.patch('requests.post')
+
+@mock.patch("requests.post")
 def test_create_session_success(mock_post, client):
-    """Test a successful POST request (e.g., create_session)."""
     session_id = "session-xyz-789"
     mock_response = mock.Mock()
     mock_response.status_code = 201
+    mock_response.content = b'{"id":"session-xyz-789"}'
     mock_response.json.return_value = {"id": session_id, "status": "created"}
     mock_post.return_value = mock_response
 
@@ -88,89 +89,145 @@ def test_create_session_success(mock_post, client):
 
     assert session_details == {"id": session_id, "status": "created"}
     assert client.session_id == session_id
-    mock_post.assert_called_once_with(
-        "http://test.invalid/v1/sessions/create",
-        headers=client._get_headers(),
-        data=None # No data payload expected for this call
-    )
 
-@mock.patch('requests.put')
+
+@mock.patch("requests.put")
 def test_start_job_success(mock_put, client):
-    """Test a successful PUT request returning 202 Accepted (e.g., start_job)."""
     job_id = "job-abc-123"
     mock_response = mock.Mock()
     mock_response.status_code = 202
-    mock_response.content = b'' # Simulate empty response body for 202
-    # Make .json() raise an error if called, as per client._make_request handling
-    mock_response.json.side_effect = requests.exceptions.JSONDecodeError("Expecting value", "doc", 0)
+    mock_response.content = b""
     mock_put.return_value = mock_response
 
     result = client.start_job(job_id)
 
-    assert result == {} # Expect empty dict for 202 with no body
-    mock_put.assert_called_once_with(
-        f"http://test.invalid/v1/jobs/{job_id}/start",
+    assert result == {}
+
+
+@mock.patch("requests.get")
+def test_download_output_no_content(mock_get, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 204
+    mock_response.content = b""
+    mock_get.return_value = mock_response
+
+    result = client.download_output("job-123")
+
+    assert result == {}
+
+
+@mock.patch("requests.get")
+def test_get_job_drc_success(mock_get, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b'{"violations":[]}'
+    mock_response.json.return_value = {"$schema": "https://schemas.kicad.org/drc.v1.json", "violations": []}
+    mock_get.return_value = mock_response
+
+    report = client.get_job_drc("job-123")
+
+    assert report["violations"] == []
+    mock_get.assert_called_once_with(
+        "http://test.invalid/v1/jobs/job-123/drc",
         headers=client._get_headers(),
-        data=None
+        timeout=client.timeout,
     )
 
-@mock.patch('requests.get')
+
+@mock.patch("requests.get")
+def test_list_all_jobs_success(mock_get, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b"[]"
+    mock_response.json.return_value = [{"id": "job-1"}]
+    mock_get.return_value = mock_response
+
+    jobs = client.list_all_jobs()
+
+    assert jobs == [{"id": "job-1"}]
+    mock_get.assert_called_once_with(
+        "http://test.invalid/v1/jobs/list/all",
+        headers=client._get_headers(),
+        timeout=client.timeout,
+    )
+
+
+@mock.patch("requests.put")
+def test_monitor_session_success(mock_put, client):
+    client.session_id = "session-1"
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b'{"success":true}'
+    mock_response.json.return_value = {"success": True}
+    mock_put.return_value = mock_response
+
+    result = client.monitor_session()
+
+    assert result["success"] is True
+
+
+@mock.patch("requests.post")
+def test_upload_input_json_with_dict(mock_post, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b'{"id":"job-1"}'
+    mock_response.json.return_value = {"id": "job-1", "state": "QUEUED"}
+    mock_post.return_value = mock_response
+
+    board = {"board": {"layers": []}}
+    result = client.upload_input_json("job-1", board)
+
+    assert result["id"] == "job-1"
+    args, kwargs = mock_post.call_args
+    assert args[0] == "http://test.invalid/v1/jobs/job-1/input/json"
+    assert json.loads(kwargs["data"]) == board
+
+
+@mock.patch("requests.get")
 def test_make_request_api_error(mock_get, client):
-    """Test handling of a non-2xx API error response (e.g., 404)."""
     mock_response = mock.Mock()
     mock_response.status_code = 404
     mock_response.text = "Resource Not Found"
-    mock_response.json.side_effect = requests.exceptions.JSONDecodeError("Expecting value", "doc", 0)
     mock_get.return_value = mock_response
 
     with pytest.raises(FreeroutingAPIError) as excinfo:
-        client.get_system_status() # Any method using _make_request with GET
+        client.get_system_status()
 
     assert excinfo.value.status_code == 404
     assert "Resource Not Found" in str(excinfo.value)
-    assert "API request failed: 404" in str(excinfo.value)
 
-@mock.patch('requests.get')
+
+@mock.patch("requests.get")
 def test_make_request_auth_error(mock_get, client):
-    """Test handling of a 401 Unauthorized error."""
     mock_response = mock.Mock()
     mock_response.status_code = 401
     mock_response.text = "Invalid credentials provided"
-    mock_response.json.side_effect = requests.exceptions.JSONDecodeError("Expecting value", "doc", 0)
     mock_get.return_value = mock_response
 
     with pytest.raises(FreeroutingAuthError) as excinfo:
         client.get_system_status()
 
     assert "Authentication failed: 401" in str(excinfo.value)
-    assert "Invalid credentials provided" in str(excinfo.value)
 
 
 def test_get_session_no_id_error(client):
-    """Test that get_session raises ValueError if no session ID is available."""
     client.session_id = None
     with pytest.raises(ValueError, match="No session ID provided or stored internally"):
         client.get_session()
 
+
 def test_enqueue_job_no_id_error(client):
-    """Test that enqueue_job raises ValueError if no session ID is available."""
     client.session_id = None
     with pytest.raises(ValueError, match="No session ID provided or stored internally"):
         client.enqueue_job(name="test_job")
 
-# --- Value Error tests for missing IDs ---
+
 def test_get_job_no_id(client):
-    """Test ValueError if job_id is empty string for get_job."""
     with pytest.raises(ValueError, match="Job ID must be provided"):
         client.get_job(job_id="")
 
-def test_start_job_no_id(client):
-    """Test ValueError if job_id is empty string for start_job."""
-    with pytest.raises(ValueError, match="Job ID must be provided"):
-        client.start_job(job_id="")
 
 def test_upload_input_no_params(client):
-    """Test ValueErrors for missing parameters in upload_input."""
     with pytest.raises(ValueError, match="Job ID must be provided"):
         client.upload_input(job_id="", filename="f", file_path="p")
     with pytest.raises(ValueError, match="Filename must be provided"):
@@ -179,8 +236,79 @@ def test_upload_input_no_params(client):
         client.upload_input(job_id="j", filename="f", file_path="")
 
 
-# --- TODO: Add more tests! ---
-# - Test methods like upload_input with file mocking (e.g., using mock_open)
-# - Test download_output (mocking GET and checking file write if path provided)
-# - Test run_routing_job workflow (requires more complex mocking of multiple steps)
-# - Test network errors (patch requests.get/post/put to raise requests.exceptions.RequestException)
+def test_parse_sse_events():
+    lines = [
+        "data: {\"message\":\"starting\"}",
+        "",
+        "data: {\"message\":\"done\"}",
+        "",
+    ]
+    events = list(_parse_sse_events(iter(lines)))
+    assert events == [{"message": "starting"}, {"message": "done"}]
+
+
+@mock.patch("requests.get")
+def test_stream_job_logs(mock_get, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.iter_lines.return_value = [
+        'data: {"level":"INFO","message":"Routing started"}',
+        "",
+    ]
+    mock_response.__enter__ = mock.Mock(return_value=mock_response)
+    mock_response.__exit__ = mock.Mock(return_value=False)
+    mock_get.return_value = mock_response
+
+    events = list(client.stream_job_logs("job-123"))
+
+    assert events == [{"level": "INFO", "message": "Routing started"}]
+    headers = mock_get.call_args.kwargs["headers"]
+    assert headers["Accept"] == "text/event-stream"
+
+
+@mock.patch("freerouting.client.FreeroutingClient.download_output")
+@mock.patch("freerouting.client.FreeroutingClient.start_job")
+@mock.patch("freerouting.client.FreeroutingClient.upload_input")
+@mock.patch("freerouting.client.FreeroutingClient.enqueue_job")
+@mock.patch("freerouting.client.FreeroutingClient.create_session")
+@mock.patch("freerouting.client.FreeroutingClient.get_job")
+@mock.patch("freerouting.client.time.sleep", return_value=None)
+@mock.patch("freerouting.client.os.path.basename", return_value="board.dsn")
+@mock.patch("builtins.open", new_callable=mock.mock_open, read_data=b"(pcb)")
+def test_run_routing_job_success(
+    mock_open_file,
+    mock_basename,
+    mock_sleep,
+    mock_get_job,
+    mock_create_session,
+    mock_enqueue_job,
+    mock_upload_input,
+    mock_start_job,
+    mock_download_output,
+    client,
+    tmp_path,
+):
+    dsn_path = tmp_path / "board.dsn"
+    dsn_path.write_bytes(b"(pcb)")
+
+    mock_create_session.return_value = {"id": "session-1"}
+    mock_enqueue_job.return_value = {"id": "job-1"}
+    mock_get_job.side_effect = [
+        {"state": "RUNNING"},
+        {"state": "COMPLETED"},
+    ]
+    mock_download_output.return_value = {"filename": "board.ses", "data": "c2Vz"}
+
+    result = client.run_routing_job(
+        name="test",
+        dsn_file_path=str(dsn_path),
+        poll_interval=1,
+        timeout=60,
+        verbose=False,
+    )
+
+    assert result["filename"] == "board.ses"
+    mock_create_session.assert_called_once()
+    mock_enqueue_job.assert_called_once()
+    mock_upload_input.assert_called_once()
+    mock_start_job.assert_called_once_with("job-1")

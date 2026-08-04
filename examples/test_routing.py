@@ -1,8 +1,7 @@
 import os
 import base64
 import sys
-from freerouting import FreeroutingClient # Import your client library
-from freerouting.client import FreeroutingError, FreeroutingAPIError, FreeroutingAuthError # Import specific errors
+from freerouting import FreeroutingClient, FreeroutingError, FreeroutingAPIError, FreeroutingAuthError
 
 # --- Configuration ---
 
@@ -52,7 +51,7 @@ try:
     output_data = client.run_routing_job(
         name=job_name,
         dsn_file_path=dsn_file_path,
-        # settings={"router_passes": 10}, # Optional: Add custom router settings here if needed
+        # settings={"max_passes": 10}, # Optional: Add custom router settings here if needed
         poll_interval=3,  # Check status every 3 seconds
         timeout=1800      # Wait up to 30 minutes (adjust as needed)
     )

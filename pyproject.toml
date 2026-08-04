@@ -4,23 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "freerouting-client"
-version = "2.1.1"
+version = "2.2.0"
 authors = [
   { name="Andras Fuchs", email="info@freerouting.app" },
 ]
 description = "The official Python client library for the Freerouting API (api.freerouting.app), an open-source, advanced PCB (printed circuit board) auto-router"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 license = { file="LICENSE" }
 keywords = ["freerouting", "pcb", "printed circuit board", "router", "autorouter", "api", "eda", "electronics", "circuits", "client"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -33,8 +32,16 @@ dependencies = [
     "requests>=2.20.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
 [project.urls]
 "Homepage" = "https://www.freerouting.app"
 "Repository" = "https://github.com/freerouting/freerouting-python-client"
 "Bug Tracker" = "https://github.com/freerouting/freerouting-python-client/issues"
-"Documentation" = "https://github.com/freerouting/freerouting/blob/master/docs/API_v1.md"
+"Documentation" = "https://github.com/freerouting/freerouting/blob/master/docs/API/API_v1.md"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
