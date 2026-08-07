@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "freerouting-client"
-version = "2.2.0"
+version = "2.3.0"
 authors = [
   { name="Andras Fuchs", email="info@freerouting.app" },
 ]
