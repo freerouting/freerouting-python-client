@@ -18,11 +18,13 @@ This library provides a convenient Python interface for interacting with the [Fr
 
 ## Installation
 
-You can install the library directly from PyPI:
+You can install the library directly from PyPI (always installs the latest release):
 
 ```bash
 pip install freerouting-client
 ```
+
+Pin a version only when you need a reproducible environment (for example `pip install "freerouting-client==<version>"`).
 
 For development:
 
@@ -81,12 +83,34 @@ print(f"Output filename: {output_data.get('filename')}")
 
 | Area | Methods |
 |------|---------|
+| Single-Turn Autorouting | `autoroute()` |
 | System | `get_system_status()`, `get_environment()` |
 | Sessions | `create_session()`, `list_sessions()`, `get_session()`, `get_session_logs()`, `monitor_session()` |
-| Jobs | `enqueue_job()`, `list_jobs()`, `list_all_jobs()`, `get_job()`, `update_job_settings()`, `start_job()`, `cancel_job()` |
-| Input / output | `upload_input()`, `upload_input_json()`, `download_output()`, `download_output_json()`, `get_job_drc()` |
+| Jobs | `enqueue_job()`, `list_jobs()`, `list_all_jobs()`, `get_job()`, `get_effective_settings()`, `update_job_settings()`, `start_job()`, `cancel_job()` |
+| Input / output | `upload_input()`, `upload_input_json()`, `upload_rules()`, `download_output()`, `download_output_json()` |
+| DRC & diagnostics | `get_job_drc()`, `get_job_drc_summary()` |
 | Logs & streaming | `get_job_logs()`, `stream_job_logs()`, `stream_job_output()`, `stream_job_output_json()` |
+| Analytics | `track_user_action()`, `identify_user()` |
 | Workflow | `run_routing_job()` |
+
+### Single-Turn Composite Autorouting (`autoroute`)
+
+For AI agents, scripts, and headless pipelines, `autoroute()` runs the entire routing lifecycle in a single HTTP request:
+
+```python
+result = client.autoroute(
+    dsn_file_path="board.dsn",
+    rules_file_path="board.rules",  # optional
+    router_settings={"autorouter": {"max_passes": 10}},
+    output_formats=["SES", "DRC_SUMMARY"],
+    timeout_seconds=120,
+)
+
+print(f"Status: {result['status']}")
+print(f"Unrouted connections: {result.get('unrouted_connections')}")
+print(f"Clearance violations: {result.get('clearance_violations')}")
+ses_content = result["outputs"]["SES"]
+```
 
 ### KiCad JSON workflow
 
@@ -109,11 +133,18 @@ for update in client.stream_job_output_json(job["id"]):
 result = client.download_output_json(job["id"], output_path="board_routed.json")
 ```
 
-### DRC report
+### DRC Report & Diagnostic Summary
 
 ```python
-drc = client.get_job_drc(job_id)
-print(len(drc.get("violations", [])))
+# Full or compact KiCad-compatible DRC report
+drc = client.get_job_drc(job_id, compact=True)
+print(f"Violations: {len(drc.get('violations', []))}")
+
+# AI-ready root-cause diagnostic summary with congestion zones and hints
+summary = client.get_job_drc_summary(job_id)
+print(f"Violations count: {summary.get('clearance_violations_count')}")
+for hint in summary.get("hints", []):
+    print(f"Hint: {hint}")
 ```
 
 ## Error Handling

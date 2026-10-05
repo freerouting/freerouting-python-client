@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "freerouting-client"
-version = "2.3.0"
+version = "2.5.0"
 authors = [
   { name="Andras Fuchs", email="info@freerouting.app" },
 ]
@@ -45,3 +45,4 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

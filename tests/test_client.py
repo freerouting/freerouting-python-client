@@ -312,3 +312,277 @@ def test_run_routing_job_success(
     mock_enqueue_job.assert_called_once()
     mock_upload_input.assert_called_once()
     mock_start_job.assert_called_once_with("job-1")
+
+
+@mock.patch("requests.get")
+def test_get_job_compact(mock_get, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b'{"id":"job-123","state":"COMPLETED"}'
+    mock_response.json.return_value = {"id": "job-123", "state": "COMPLETED"}
+    mock_get.return_value = mock_response
+
+    job = client.get_job("job-123", compact=True)
+
+    assert job["id"] == "job-123"
+    mock_get.assert_called_once_with(
+        "http://test.invalid/v1/jobs/job-123?compact=true",
+        headers=client._get_headers(),
+        timeout=client.timeout,
+    )
+
+
+@mock.patch("requests.get")
+def test_get_effective_settings_success(mock_get, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b'{"max_passes":10}'
+    mock_response.json.return_value = {"max_passes": 10}
+    mock_get.return_value = mock_response
+
+    settings = client.get_effective_settings("job-123")
+
+    assert settings == {"max_passes": 10}
+    mock_get.assert_called_once_with(
+        "http://test.invalid/v1/jobs/job-123/settings",
+        headers=client._get_headers(),
+        timeout=client.timeout,
+    )
+
+
+def test_get_effective_settings_no_id(client):
+    with pytest.raises(ValueError, match="Job ID must be provided"):
+        client.get_effective_settings("")
+
+
+@mock.patch("requests.post")
+def test_upload_rules_success(mock_post, client, tmp_path):
+    rules_file = tmp_path / "design.rules"
+    rules_file.write_bytes(b"(rules (classes ...))")
+
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b'{"id":"job-123"}'
+    mock_response.json.return_value = {"id": "job-123", "state": "QUEUED"}
+    mock_post.return_value = mock_response
+
+    result = client.upload_rules("job-123", "design.rules", str(rules_file))
+
+    assert result["id"] == "job-123"
+    args, kwargs = mock_post.call_args
+    assert args[0] == "http://test.invalid/v1/jobs/job-123/rules"
+    body = json.loads(kwargs["data"])
+    assert body["filename"] == "design.rules"
+    import base64
+    assert base64.b64decode(body["data"]) == b"(rules (classes ...))"
+
+
+def test_upload_rules_no_params(client):
+    with pytest.raises(ValueError, match="Job ID must be provided"):
+        client.upload_rules(job_id="", filename="f", file_path="p")
+    with pytest.raises(ValueError, match="Filename must be provided"):
+        client.upload_rules(job_id="j", filename="", file_path="p")
+    with pytest.raises(ValueError, match="File path must be provided"):
+        client.upload_rules(job_id="j", filename="f", file_path="")
+
+
+def test_upload_rules_not_found(client):
+    with pytest.raises(FileNotFoundError):
+        client.upload_rules("job-123", "f.rules", "non_existent_file_123.rules")
+
+
+@mock.patch("requests.get")
+def test_get_job_drc_compact(mock_get, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b'{"unconnected_count":0,"violations":[]}'
+    mock_response.json.return_value = {"unconnected_count": 0, "violations": []}
+    mock_get.return_value = mock_response
+
+    report = client.get_job_drc("job-123", compact=True)
+
+    assert report["unconnected_count"] == 0
+    mock_get.assert_called_once_with(
+        "http://test.invalid/v1/jobs/job-123/drc?compact=true",
+        headers=client._get_headers(),
+        timeout=client.timeout,
+    )
+
+
+@mock.patch("requests.get")
+def test_get_job_drc_summary_success(mock_get, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b'{"clearance_violations_count":0,"hints":[]}'
+    mock_response.json.return_value = {"clearance_violations_count": 0, "hints": []}
+    mock_get.return_value = mock_response
+
+    summary = client.get_job_drc_summary("job-123")
+
+    assert summary["clearance_violations_count"] == 0
+    mock_get.assert_called_once_with(
+        "http://test.invalid/v1/jobs/job-123/drc/summary",
+        headers=client._get_headers(),
+        timeout=client.timeout,
+    )
+
+
+def test_get_job_drc_summary_no_id(client):
+    with pytest.raises(ValueError, match="Job ID must be provided"):
+        client.get_job_drc_summary("")
+
+
+@mock.patch("requests.post")
+def test_autoroute_success_with_content(mock_post, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b'{"status":"COMPLETED","outputs":{"SES":"(session ...)"}}'
+    mock_response.json.return_value = {
+        "job_id": "job-auto-1",
+        "status": "COMPLETED",
+        "outputs": {"SES": "(session ...)"},
+        "duration_seconds": 3.14,
+    }
+    mock_post.return_value = mock_response
+
+    result = client.autoroute(
+        file_content="(pcb board)",
+        rules_content="(rules ...)",
+        router_settings={"autorouter": {"max_passes": 5}},
+        output_formats=["SES", "DRC_SUMMARY"],
+        timeout_seconds=60,
+    )
+
+    assert result["status"] == "COMPLETED"
+    assert result["outputs"]["SES"] == "(session ...)"
+    args, kwargs = mock_post.call_args
+    assert args[0] == "http://test.invalid/v1/autoroute"
+    body = json.loads(kwargs["data"])
+    assert body["file_content"] == "(pcb board)"
+    assert body["rules_content"] == "(rules ...)"
+    assert body["router_settings"] == {"autorouter": {"max_passes": 5}}
+    assert body["output_formats"] == ["SES", "DRC_SUMMARY"]
+    assert body["timeout_seconds"] == 60
+    assert kwargs["timeout"] == 90  # timeout_seconds + 30
+
+
+@mock.patch("requests.post")
+def test_autoroute_success_with_file_paths(mock_post, client, tmp_path):
+    dsn_path = tmp_path / "board.dsn"
+    dsn_path.write_text("(pcb from file)", encoding="utf-8")
+    rules_path = tmp_path / "board.rules"
+    rules_path.write_text("(rules from file)", encoding="utf-8")
+
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b'{"status":"COMPLETED"}'
+    mock_response.json.return_value = {"status": "COMPLETED"}
+    mock_post.return_value = mock_response
+
+    result = client.autoroute(
+        dsn_file_path=str(dsn_path),
+        rules_file_path=str(rules_path),
+    )
+
+    assert result["status"] == "COMPLETED"
+    body = json.loads(mock_post.call_args.kwargs["data"])
+    assert body["file_content"] == "(pcb from file)"
+    assert body["rules_content"] == "(rules from file)"
+
+
+def test_autoroute_no_content_or_path(client):
+    with pytest.raises(ValueError, match="Primary design content must be provided"):
+        client.autoroute()
+
+
+@mock.patch("requests.post")
+def test_track_user_action_success(mock_post, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b"{}"
+    mock_response.json.return_value = {}
+    mock_post.return_value = mock_response
+
+    res = client.track_user_action("job_started", {"jobId": "job-123"})
+
+    assert res == {}
+    args, kwargs = mock_post.call_args
+    assert args[0] == "http://test.invalid/v1/analytics/track"
+    body = json.loads(kwargs["data"])
+    assert body["event"] == "job_started"
+    assert body["properties"] == {"jobId": "job-123"}
+    assert body["userId"] == client.profile_id
+
+
+def test_track_user_action_no_event(client):
+    with pytest.raises(ValueError, match="Event name must be provided"):
+        client.track_user_action("")
+
+
+@mock.patch("requests.post")
+def test_identify_user_success(mock_post, client):
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.content = b"{}"
+    mock_response.json.return_value = {}
+    mock_post.return_value = mock_response
+
+    res = client.identify_user({"os_name": "Linux", "client_version": "2.5.0"})
+
+    assert res == {}
+    args, kwargs = mock_post.call_args
+    assert args[0] == "http://test.invalid/v1/analytics/identify"
+    body = json.loads(kwargs["data"])
+    assert body["traits"] == {"os_name": "Linux", "client_version": "2.5.0"}
+    assert body["userId"] == client.profile_id
+
+
+def test_identify_user_none_traits(client):
+    with pytest.raises(ValueError, match="Traits dictionary must be provided"):
+        client.identify_user(None)
+
+
+@mock.patch("freerouting.client.FreeroutingClient.download_output")
+@mock.patch("freerouting.client.FreeroutingClient.start_job")
+@mock.patch("freerouting.client.FreeroutingClient.upload_rules")
+@mock.patch("freerouting.client.FreeroutingClient.upload_input")
+@mock.patch("freerouting.client.FreeroutingClient.enqueue_job")
+@mock.patch("freerouting.client.FreeroutingClient.create_session")
+@mock.patch("freerouting.client.FreeroutingClient.get_job")
+@mock.patch("freerouting.client.time.sleep", return_value=None)
+@mock.patch("builtins.open", new_callable=mock.mock_open, read_data=b"(pcb)")
+def test_run_routing_job_with_rules(
+    mock_open_file,
+    mock_sleep,
+    mock_get_job,
+    mock_create_session,
+    mock_enqueue_job,
+    mock_upload_input,
+    mock_upload_rules,
+    mock_start_job,
+    mock_download_output,
+    client,
+    tmp_path,
+):
+    dsn_path = tmp_path / "board.dsn"
+    dsn_path.write_bytes(b"(pcb)")
+    rules_path = tmp_path / "board.rules"
+    rules_path.write_bytes(b"(rules)")
+
+    mock_create_session.return_value = {"id": "session-1"}
+    mock_enqueue_job.return_value = {"id": "job-1"}
+    mock_get_job.return_value = {"state": "COMPLETED"}
+    mock_download_output.return_value = {"filename": "board.ses", "data": "c2Vz"}
+
+    result = client.run_routing_job(
+        name="test_with_rules",
+        dsn_file_path=str(dsn_path),
+        rules_file_path=str(rules_path),
+        poll_interval=1,
+        timeout=60,
+        verbose=False,
+    )
+
+    assert result["filename"] == "board.ses"
+    mock_upload_input.assert_called_once()
+    mock_upload_rules.assert_called_once_with("job-1", "board.rules", str(rules_path))

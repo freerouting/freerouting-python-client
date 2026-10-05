@@ -236,11 +236,32 @@ class FreeroutingClient:
         """List all jobs belonging to the current profile, regardless of session."""
         return self._make_request("GET", "/jobs/list/all")
 
-    def get_job(self, job_id: str) -> Dict[str, Any]:
-        """Get details for a specific job by its ID."""
+    def get_job(self, job_id: str, *, compact: bool = False) -> Dict[str, Any]:
+        """
+        Get details for a specific job by its ID.
+
+        Args:
+            job_id: The unique identifier of the job.
+            compact: When True, returns a compact, token-efficient summary.
+        """
         if not job_id:
             raise ValueError("Job ID must be provided.")
-        return self._make_request("GET", f"/jobs/{job_id}")
+        endpoint = f"/jobs/{job_id}?compact=true" if compact else f"/jobs/{job_id}"
+        return self._make_request("GET", endpoint)
+
+    def get_effective_settings(self, job_id: str) -> Dict[str, Any]:
+        """
+        Get effective merged router settings for a job.
+
+        Resolves all configuration layers (defaults, DSN, rules, CLI, and API overrides),
+        board-specific optimizations, and preflight validation warnings.
+
+        Args:
+            job_id: The unique identifier of the job.
+        """
+        if not job_id:
+            raise ValueError("Job ID must be provided.")
+        return self._make_request("GET", f"/jobs/{job_id}/settings")
 
     def update_job_settings(self, job_id: str, settings: Dict[str, Any]) -> Dict[str, Any]:
         """Update settings for a specific job while it is still queued."""
@@ -319,6 +340,36 @@ class FreeroutingClient:
             return {}
         return response.json()
 
+    def upload_rules(self, job_id: str, filename: str, file_path: str) -> Dict[str, Any]:
+        """
+        Upload a Specctra design rules (.rules) file for a job.
+
+        Args:
+            job_id: Unique identifier of the job.
+            filename: Name of the rules file (e.g., "design.rules").
+            file_path: Path to the local .rules file.
+        """
+        if not job_id:
+            raise ValueError("Job ID must be provided.")
+        if not filename:
+            raise ValueError("Filename must be provided.")
+        if not file_path:
+            raise ValueError("File path must be provided.")
+
+        try:
+            with open(file_path, "rb") as file_handle:
+                file_data = file_handle.read()
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Rules file not found at: {file_path}") from None
+        except OSError as e:
+            raise OSError(f"Could not read rules file at {file_path}: {e}") from e
+
+        data = {
+            "filename": filename,
+            "data": base64.b64encode(file_data).decode("utf-8"),
+        }
+        return self._make_request("POST", f"/jobs/{job_id}/rules", data)
+
     def download_output(self, job_id: str, output_path: Optional[str] = None) -> Dict[str, Any]:
         """Download Specctra SES output from a job."""
         if not job_id:
@@ -344,11 +395,31 @@ class FreeroutingClient:
 
         return result
 
-    def get_job_drc(self, job_id: str) -> Dict[str, Any]:
-        """Get a KiCad-compatible DRC report for a job."""
+    def get_job_drc(self, job_id: str, *, compact: bool = False) -> Dict[str, Any]:
+        """
+        Get a KiCad-compatible DRC report for a job.
+
+        Args:
+            job_id: Unique identifier of the job.
+            compact: When True, returns a compact token-saving DRC report summary.
+        """
         if not job_id:
             raise ValueError("Job ID must be provided.")
-        return self._make_request("GET", f"/jobs/{job_id}/drc")
+        endpoint = f"/jobs/{job_id}/drc?compact=true" if compact else f"/jobs/{job_id}/drc"
+        return self._make_request("GET", endpoint)
+
+    def get_job_drc_summary(self, job_id: str) -> Dict[str, Any]:
+        """
+        Get a structured DRC diagnostic summary for a job.
+
+        Clusters violations into spatial congestion hotspots and offers layout auto-correction hints.
+
+        Args:
+            job_id: Unique identifier of the job.
+        """
+        if not job_id:
+            raise ValueError("Job ID must be provided.")
+        return self._make_request("GET", f"/jobs/{job_id}/drc/summary")
 
     def get_job_logs(self, job_id: str) -> List[Dict[str, Any]]:
         """Get logs for a specific job."""
@@ -385,6 +456,153 @@ class FreeroutingClient:
         except (TypeError, base64.binascii.Error) as e:
             raise ValueError(f"Failed to decode base64 data from API response: {e}") from e
 
+    # --- Single-Turn Composite Autoroute ---
+
+    def autoroute(
+        self,
+        file_content: Optional[str] = None,
+        *,
+        dsn_file_path: Optional[str] = None,
+        rules_content: Optional[str] = None,
+        rules_file_path: Optional[str] = None,
+        session_content: Optional[str] = None,
+        session_file_path: Optional[str] = None,
+        router_settings: Optional[Dict[str, Any]] = None,
+        drc_settings: Optional[Dict[str, Any]] = None,
+        output_formats: Optional[List[str]] = None,
+        timeout_seconds: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Perform single-turn composite autorouting (POST /v1/autoroute).
+
+        Executes the entire routing pipeline synchronously in a single HTTP turn.
+        Accepts multi-file inputs (primary design .dsn or .json, optional .rules,
+        optional initial .ses or .json), executes routing within the requested
+        timeout budget, and returns all requested output representations (SES,
+        KICAD_JSON, SCR, DRC_JSON, DRC_SUMMARY) and metrics in a single response.
+
+        Args:
+            file_content: Raw text content of the primary design (.dsn or KiCad .json).
+            dsn_file_path: Local file path to read primary design from if file_content is not passed.
+            rules_content: Optional raw text content of Specctra design rules (.rules).
+            rules_file_path: Optional local path to read design rules from if rules_content is not passed.
+            session_content: Optional raw text content of initial session (.ses or KiCad .json).
+            session_file_path: Optional local path to read session from if session_content is not passed.
+            router_settings: Optional router settings configuration overrides.
+            drc_settings: Optional design rule checker settings configuration.
+            output_formats: Desired output formats: 'SES', 'KICAD_JSON', 'SCR', 'DRC_JSON', 'DRC_SUMMARY'. Defaults to ['SES'].
+            timeout_seconds: Maximum execution budget in seconds (default: 300).
+        """
+        design_text = file_content
+        if design_text is None and dsn_file_path is not None:
+            try:
+                with open(dsn_file_path, "r", encoding="utf-8") as f:
+                    design_text = f.read()
+            except UnicodeDecodeError:
+                with open(dsn_file_path, "rb") as f:
+                    design_text = f.read().decode("latin-1")
+            except OSError as e:
+                raise OSError(f"Could not read primary design file at {dsn_file_path}: {e}") from e
+
+        if design_text is None or not str(design_text).strip():
+            raise ValueError("Primary design content must be provided via 'file_content' or 'dsn_file_path'.")
+
+        rules_text = rules_content
+        if rules_text is None and rules_file_path is not None:
+            try:
+                with open(rules_file_path, "r", encoding="utf-8") as f:
+                    rules_text = f.read()
+            except UnicodeDecodeError:
+                with open(rules_file_path, "rb") as f:
+                    rules_text = f.read().decode("latin-1")
+            except OSError as e:
+                raise OSError(f"Could not read rules file at {rules_file_path}: {e}") from e
+
+        session_text = session_content
+        if session_text is None and session_file_path is not None:
+            try:
+                with open(session_file_path, "r", encoding="utf-8") as f:
+                    session_text = f.read()
+            except UnicodeDecodeError:
+                with open(session_file_path, "rb") as f:
+                    session_text = f.read().decode("latin-1")
+            except OSError as e:
+                raise OSError(f"Could not read session file at {session_file_path}: {e}") from e
+
+        payload: Dict[str, Any] = {
+            "file_content": design_text,
+        }
+        if rules_text is not None:
+            payload["rules_content"] = rules_text
+        if session_text is not None:
+            payload["session_content"] = session_text
+        if router_settings is not None:
+            payload["router_settings"] = router_settings
+        if drc_settings is not None:
+            payload["drc_settings"] = drc_settings
+        if output_formats is not None:
+            payload["output_formats"] = output_formats
+        if timeout_seconds is not None:
+            payload["timeout_seconds"] = timeout_seconds
+
+        http_timeout = (timeout_seconds + 30) if timeout_seconds is not None else max(self.timeout, 330)
+        return self._make_request("POST", "/autoroute", data=payload, timeout=http_timeout)
+
+    # --- Analytics Endpoints ---
+
+    def track_user_action(
+        self,
+        event: str,
+        properties: Optional[Dict[str, Any]] = None,
+        *,
+        user_id: Optional[str] = None,
+        anonymous_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Record an analytics event in BigQuery.
+
+        Args:
+            event: Event name (e.g. "job_started", "autoroute_completed").
+            properties: Optional dictionary of event properties.
+            user_id: Optional user identifier (defaults to profile_id).
+            anonymous_id: Optional anonymous identifier.
+        """
+        if not event:
+            raise ValueError("Event name must be provided.")
+        payload: Dict[str, Any] = {
+            "event": event,
+            "properties": properties or {},
+            "userId": user_id or self.profile_id,
+        }
+        if anonymous_id:
+            payload["anonymousId"] = anonymous_id
+        return self._make_request("POST", "/analytics/track", data=payload)
+
+    def identify_user(
+        self,
+        traits: Dict[str, Any],
+        *,
+        user_id: Optional[str] = None,
+        anonymous_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Associate user traits with an identity for analytics purposes.
+
+        Args:
+            traits: Dictionary of user traits (e.g. client_version, os_name, allow_telemetry).
+            user_id: Optional user identifier (defaults to profile_id).
+            anonymous_id: Optional anonymous identifier.
+        """
+        if traits is None:
+            raise ValueError("Traits dictionary must be provided.")
+        payload: Dict[str, Any] = {
+            "traits": traits,
+            "userId": user_id or self.profile_id,
+        }
+        if anonymous_id:
+            payload["anonymousId"] = anonymous_id
+        return self._make_request("POST", "/analytics/identify", data=payload)
+
     # --- Workflow helpers ---
 
     def run_routing_job(
@@ -392,6 +610,7 @@ class FreeroutingClient:
         name: str,
         dsn_file_path: str,
         settings: Optional[Dict[str, Any]] = None,
+        rules_file_path: Optional[str] = None,
         poll_interval: int = 5,
         timeout: int = 3600,
         output_path: Optional[str] = None,
@@ -438,6 +657,12 @@ class FreeroutingClient:
         log(f"Uploading input file '{filename}' from '{dsn_file_path}'...")
         self.upload_input(job_id, filename, dsn_file_path)
         log("Upload complete.")
+
+        if rules_file_path:
+            rules_filename = os.path.basename(rules_file_path)
+            log(f"Uploading rules file '{rules_filename}' from '{rules_file_path}'...")
+            self.upload_rules(job_id, rules_filename, rules_file_path)
+            log("Rules upload complete.")
 
         if settings:
             log("Updating job settings...")
